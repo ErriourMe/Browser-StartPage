@@ -1,0 +1,23 @@
+services:
+  brave-stats:
+    build:
+      context: ./service/start-page
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:7777:7777"
+    environment:
+      BRAVE_STATS_HOST: "0.0.0.0"
+      BRAVE_STATS_PORT: "7777"
+      BRAVE_STATS_HTTP_PATH: /api/brave-stats.json
+      BOOKMARKS_HTTP_PATH: /api/bookmarks.json
+      BRAVE_PREFERENCES: /prefs/Preferences
+      BROWSER_PAGE_ROOT: /startpage
+    volumes:
+      - type: bind
+        source: ${BRAVE_PREFERENCES_HOST_PATH:-${HOME}/.config/BraveSoftware/Brave-Browser/Default/Preferences}
+        target: /prefs/Preferences
+        read_only: true
+      - type: bind
+        source: .
+        target: /startpage
+    restart: unless-stopped

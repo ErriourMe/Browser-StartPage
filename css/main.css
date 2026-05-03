@@ -1,0 +1,504 @@
+@font-face {
+  font-family: Inter;
+  font-style: normal;
+  font-weight: 100 900;
+  /* без swap: не подменяем метрики текста после первой отрисовки */
+  font-display: optional;
+  src: url("../fonts/inter-latin.woff2") format("woff2");
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: rgba(255, 255, 255, 0.95);
+  background: #0a0c12;
+  overflow-x: hidden;
+}
+
+#bg-stack {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+.bg-layer {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-color: #0a0c12;
+  opacity: 0;
+  transform: scale(1.02);
+  transition: opacity 0.7s ease, transform 1.2s ease;
+  will-change: opacity;
+}
+
+.bg-layer.is-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.bg-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: radial-gradient(ellipse 120% 80% at 50% 40%, rgba(10, 12, 18, 0.35), rgba(6, 8, 14, 0.72));
+  pointer-events: none;
+}
+
+.layout {
+  position: relative;
+  z-index: 2;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 1.25rem 2.5rem;
+}
+
+.v-spacer {
+  flex: 1 1 0;
+  min-height: 1rem;
+  width: 100%;
+  pointer-events: none;
+}
+
+.cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.15rem;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.clock {
+  align-self: flex-start;
+  margin: 0 0 1rem;
+  /* системный шрифт: не наследует Inter, нет FOUT при подгрузке woff2 */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: clamp(3rem, 8vw, 4.5rem);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.45);
+  /* резерв ширины под 88:88 — меньше сдвига до применения clamp */
+  min-width: 5.5ch;
+  display: inline-block;
+}
+
+.dock {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(960px, 100%);
+  padding: 0.65rem 0.75rem;
+  margin: 0;
+  border-radius: 1.25rem;
+  background: rgba(18, 22, 32, 0.45);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.bookmarks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  justify-content: center;
+}
+
+/* Пустой список иначе участвует в gap у .dock и даёт лишний отступ перед «+» */
+.bookmarks:empty {
+  display: none;
+}
+
+.bookmark {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: 4.25rem;
+  cursor: grab;
+}
+
+.bookmark--dragging {
+  cursor: grabbing;
+  opacity: 0.65;
+}
+
+/* Вертикальная черта слева/справа — ряд закладок горизонтальный */
+.bookmark--drop-before::before,
+.bookmark--drop-after::after {
+  content: "";
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 1px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.bookmark--drop-before::before {
+  left: 0;
+}
+
+.bookmark--drop-after::after {
+  right: 0;
+}
+
+.bookmark-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+}
+
+.bookmark-fallback {
+  position: relative;
+  z-index: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.bookmark-icon {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  padding: 10px;
+  border-radius: 16px;
+  overflow: hidden;
+  object-fit: contain;
+  opacity: 1;
+  pointer-events: none;
+}
+
+.bookmark-link.has-icon .bookmark-fallback {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.bookmark-link:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.bookmark-label {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.82);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-ctx {
+  position: fixed;
+  z-index: 10000;
+  min-width: 10rem;
+  padding: 0.25rem 0;
+  border-radius: 0.5rem;
+  background: rgba(26, 30, 42, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.bookmark-ctx-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bookmark-ctx-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.bookmark-add-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: 4.25rem;
+}
+
+.bookmark-add-label {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.82);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-add {
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 0.75rem;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.bookmark-add:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.search {
+  width: min(840px, 100%);
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.65rem 0.4rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(16, 18, 26, 0.55);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+
+.search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 0;
+  border: none;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 1rem;
+  padding: 0.35rem 0.35rem 0.35rem 2.25rem;
+  margin: 0;
+  outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24'%3E%3Cpath fill='%234285F4' d='M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z'/%3E%3Cpath fill='%2334A853' d='M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z'/%3E%3Cpath fill='%23FBBC05' d='M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z'/%3E%3Cpath fill='%23EA4335' d='M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 0.15rem 50%;
+  background-size: 20px 20px;
+}
+
+.search-input::placeholder {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.search-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.btn {
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.btn-primary {
+  background: rgba(66, 133, 244, 0.22);
+  border-color: rgba(66, 133, 244, 0.45);
+}
+
+.btn-primary:hover {
+  background: rgba(66, 133, 244, 0.32);
+  border-color: rgba(66, 133, 244, 0.55);
+}
+
+body:not(.is-brave) .stats {
+  display: none;
+}
+
+.stats {
+  flex-shrink: 0;
+  width: min(720px, 100%);
+  padding: 1rem 1.25rem 1.1rem;
+  border-radius: 1rem;
+  background: rgba(18, 22, 32, 0.5);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.35);
+  /* системный шрифт: цифры не «прыгают» при подгрузке Inter (как у .clock) */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.stats-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.stat-value {
+  display: block;
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: -4px;
+}
+
+.stat-label {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+#stat-a {
+  color: #ff8258;
+}
+
+#stat-b {
+  color: #a1a2ff;
+}
+
+.modal {
+  border: none;
+  border-radius: 1rem;
+  padding: 0;
+  background: rgba(22, 26, 38, 0.96);
+  color: #fff;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  max-width: min(400px, 92vw);
+}
+
+.modal::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.modal-form {
+  padding: 1.25rem 1.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.modal-form h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.modal-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.modal-form input {
+  font: inherit;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.35rem;
+}
+
+@media (max-width: 520px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .clock {
+    align-self: center;
+  }
+
+  .layout {
+    padding-top: 1.25rem;
+  }
+
+  .search {
+    gap: 0.35rem;
+    padding-left: 0.55rem;
+    padding-right: 0.45rem;
+  }
+
+  .search .btn {
+    font-size: 0.8125rem;
+    padding: 0.38rem 0.65rem;
+  }
+}

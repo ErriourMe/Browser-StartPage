@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Новая вкладка</title>
+  <meta name="description" content="Локальная стартовая страница: закладки, поиск, часы и фон.">
+  <meta name="theme-color" content="#35363a">
+  <meta name="apple-mobile-web-app-title" content="Новая вкладка">
+  <meta property="og:title" content="Новая вкладка">
+  <meta property="og:description" content="Локальная стартовая страница: закладки, поиск, часы и фон.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="dns-prefetch" href="https://picsum.photos">
+  <link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/main.css">
+</head>
+<body>
+  <div id="bg-stack" aria-hidden="true">
+    <div class="bg-layer" id="bg-0"></div>
+    <div class="bg-layer" id="bg-1"></div>
+  </div>
+  <div class="bg-veil" aria-hidden="true"></div>
+
+  <main class="layout">
+    <time class="clock" id="clock" datetime=""></time>
+    <script>
+      (function () {
+        var el = document.getElementById("clock");
+        if (!el) return;
+        var d = new Date();
+        el.textContent =
+          String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+        try {
+          el.setAttribute("datetime", d.toISOString());
+        } catch (e) {}
+      })();
+    </script>
+    <div class="v-spacer" aria-hidden="true"></div>
+
+    <div class="cluster">
+    <section class="dock" aria-label="Закладки">
+      <!--STARTPAGE_BOOKMARKS-->
+      <div class="bookmark-add-wrap">
+        <button type="button" class="bookmark-add" id="btn-add-bookmark" title="Добавить закладку">+</button>
+        <span class="bookmark-add-label">Добавить</span>
+      </div>
+    </section>
+
+    <form class="search" id="search-form" action="#" method="get" autocomplete="off">
+      <input class="search-input" id="search-q" type="search" name="q" placeholder="Искать в интернете" enterkeyhint="search">
+      <div class="search-actions">
+        <button type="submit" class="btn btn-primary" id="btn-ai" name="mode" value="ai">Поиск по ИИ</button>
+        <button type="button" class="btn" id="btn-regular" value="regular">Обычный поиск</button>
+      </div>
+    </form>
+    </div>
+
+    <div class="v-spacer" aria-hidden="true"></div>
+
+    <section class="stats" aria-label="Статистика">
+      <h2 class="stats-title">Статистика</h2>
+      <div class="stats-grid">
+        <div class="stat">
+          <span class="stat-value" id="stat-a">—</span>
+          <span class="stat-label">Заблокировано трекеров</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-b">—</span>
+          <span class="stat-label">Сэкономленный трафик</span>
+        </div>
+        <div class="stat">
+          <span class="stat-value" id="stat-c">—</span>
+          <span class="stat-label">Сэкономлено времени</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog class="modal" id="dlg-bookmark">
+    <form class="modal-form" id="form-bookmark">
+      <h3>Новая закладка</h3>
+      <label>Название<input type="text" id="bm-title" required maxlength="32"></label>
+      <label>Адрес (URL)<input type="text" id="bm-url" required placeholder="https://…" autocomplete="url"></label>
+      <div class="modal-buttons">
+        <button type="submit" value="ok" class="btn btn-primary">Сохранить</button>
+        <button type="button" class="btn" id="bm-cancel">Отмена</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/app.js" defer></script>
+</body>
+</html>
