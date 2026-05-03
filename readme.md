@@ -1,4 +1,4 @@
-# Start Page
+# Browser Start Page
 
 Стартовая страница для браузера в стиле Brave.
 
