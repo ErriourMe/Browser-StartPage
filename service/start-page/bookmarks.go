@@ -263,6 +263,12 @@ func writeBookmarksCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
+func writeBlockedBgCORS(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
 func bookmarksPutHandler(w http.ResponseWriter, r *http.Request, path string) {
 	if r.Method == http.MethodOptions {
 		writeBookmarksCORS(w)

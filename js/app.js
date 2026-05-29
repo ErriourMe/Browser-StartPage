@@ -18,6 +18,12 @@ const CFG = {
   bookmarksURL() {
     return `${API_ORIGIN}/api/bookmarks.json`;
   },
+  bgBlockedURL() {
+    return `${API_ORIGIN}/api/bg-blocked.json`;
+  },
+  bgBlockedImageURL(id) {
+    return `${API_ORIGIN}/api/bg-blocked/image/${encodeURIComponent(id)}`;
+  },
   IDB_NAME: "sp_background_v1",
   IDB_VER: 2,
   IDB_STORE: "images",
@@ -986,6 +992,233 @@ const Background = (() => {
     prefetching: false,
   };
 
+  /** @type {Set<string>} */
+  let blockedSet = new Set();
+  /** @type {Set<string>} */
+  let blockedHashes = new Set();
+  let blockedReady = false;
+  /** @type {Promise<void> | null} */
+  let blockedLoadPromise = null;
+
+  function readLegacyBlocked() {
+    try {
+      const raw = localStorage.getItem("sp_bg_blocked_v1");
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function clearLegacyBlocked() {
+    try {
+      localStorage.removeItem("sp_bg_blocked_v1");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** @param {unknown} data */
+  function parseBlockedPayload(data) {
+    if (Array.isArray(data)) {
+      return { ids: data.map(String), hashes: [] };
+    }
+    if (data && typeof data === "object") {
+      const o = /** @type {{ ids?: unknown, hashes?: unknown }} */ (data);
+      const ids = Array.isArray(o.ids) ? o.ids.map(String) : [];
+      const hashes = Array.isArray(o.hashes) ? o.hashes.map((h) => String(h).toLowerCase()) : [];
+      return { ids, hashes };
+    }
+    return { ids: [], hashes: [] };
+  }
+
+  /** @param {{ ids: string[], hashes: string[] }} payload */
+  function applyBlockedPayload(payload) {
+    blockedSet = new Set(payload.ids);
+    blockedHashes = new Set(payload.hashes.filter((h) => h.length === 64));
+  }
+
+  /** @param {Blob} blob */
+  async function blobSha256(blob) {
+    const buf = await blob.arrayBuffer();
+    const hash = await crypto.subtle.digest("SHA-256", buf);
+    return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  /** @param {Set<string>} ids @param {Set<string>} hashes */
+  async function persistBlockedPayload(ids, hashes, alertOnError = true) {
+    applyBlockedPayload({
+      ids: [...ids],
+      hashes: [...hashes],
+    });
+    try {
+      const r = await fetch(CFG.bgBlockedURL(), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [...blockedSet], hashes: [...blockedHashes] }),
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        throw new Error(t || String(r.status));
+      }
+      clearLegacyBlocked();
+    } catch (e) {
+      if (alertOnError) {
+        window.alert(e instanceof Error ? e.message : String(e));
+      }
+      throw e;
+    }
+  }
+
+  async function backfillHashesFromServerImages() {
+    for (const id of blockedSet) {
+      try {
+        const r = await fetch(CFG.bgBlockedImageURL(id), { cache: "no-store" });
+        if (!r.ok) continue;
+        const blob = await r.blob();
+        blockedHashes.add(await blobSha256(blob));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  async function refreshBlockedFromServer() {
+    let payload = { ids: [], hashes: [] };
+    let serverOk = false;
+    try {
+      const r = await fetch(CFG.bgBlockedURL(), { cache: "no-store" });
+      if (r.ok) {
+        payload = parseBlockedPayload(await r.json());
+        serverOk = true;
+      }
+    } catch {
+      /* сервер недоступен */
+    }
+
+    const legacy = readLegacyBlocked();
+    applyBlockedPayload({
+      ids: [...new Set([...payload.ids, ...legacy])],
+      hashes: payload.hashes,
+    });
+    blockedReady = true;
+
+    if (serverOk && blockedHashes.size < blockedSet.size) {
+      await backfillHashesFromServerImages();
+    }
+
+    if (serverOk && legacy.length) {
+      try {
+        await persistBlockedPayload(blockedSet, blockedHashes, false);
+        clearLegacyBlocked();
+      } catch {
+        /* оставим legacy до следующего раза */
+      }
+    }
+  }
+
+  function reloadBlockedList() {
+    blockedReady = false;
+    blockedLoadPromise = null;
+    return refreshBlockedFromServer();
+  }
+
+  function ensureBlockedLoaded() {
+    if (blockedReady) return Promise.resolve();
+    if (!blockedLoadPromise) blockedLoadPromise = refreshBlockedFromServer();
+    return blockedLoadPromise;
+  }
+
+  function isBlocked(id) {
+    return blockedSet.has(String(id));
+  }
+
+  /** @param {string} hash */
+  function isBlockedHash(hash) {
+    return blockedHashes.has(String(hash).toLowerCase());
+  }
+
+  /** @param {Blob} blob */
+  async function isBlockedBlob(blob) {
+    return isBlockedHash(await blobSha256(blob));
+  }
+
+  /** @param {IDBDatabase} db @param {string} id */
+  async function idBlockedByHash(db, id) {
+    const blob = await blobForId(db, id);
+    if (!blob) return false;
+    return isBlockedBlob(blob);
+  }
+
+  /** @param {IDBDatabase} db @param {string} id */
+  async function isBlockedCandidate(db, id) {
+    if (isBlocked(id)) return true;
+    return idBlockedByHash(db, id);
+  }
+
+  /** @param {string} id @param {Blob} blob */
+  async function uploadBlockedImage(id, blob) {
+    const r = await fetch(CFG.bgBlockedImageURL(id), {
+      method: "PUT",
+      headers: { "Content-Type": blob.type || "image/jpeg" },
+      body: blob,
+    });
+    if (!r.ok) {
+      const t = await r.text();
+      throw new Error(t || String(r.status));
+    }
+  }
+
+  /** @param {string} id */
+  async function deleteBlockedImageOnServer(id) {
+    try {
+      await fetch(CFG.bgBlockedImageURL(id), { method: "DELETE" });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** @param {string} id */
+  async function serverHasBlockedImage(id) {
+    try {
+      const r = await fetch(CFG.bgBlockedImageURL(id), { method: "HEAD", cache: "no-store" });
+      return r.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /** @param {string} id @param {IDBDatabase | null} db */
+  async function ensureBlockedImageOnServer(id, db) {
+    if (await serverHasBlockedImage(id)) return true;
+    if (!db) return false;
+    const blob = await blobForId(db, id);
+    if (!blob) return false;
+    try {
+      await uploadBlockedImage(id, blob);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** @param {IDBDatabase} db @param {{ ids: string[], cursor: number }} meta */
+  async function sanitizeMeta(db, meta) {
+    await ensureBlockedLoaded();
+    const cleaned = [];
+    for (const id of meta.ids) {
+      if (!(await isBlockedCandidate(db, id))) cleaned.push(id);
+    }
+    if (cleaned.length !== meta.ids.length) {
+      meta.ids = cleaned;
+      if (meta.cursor >= meta.ids.length) {
+        meta.cursor = Math.max(0, meta.ids.length - 1);
+      }
+      await writeMeta(db, meta);
+    }
+    return meta;
+  }
+
   function layers() {
     return [document.getElementById("bg-0"), document.getElementById("bg-1")];
   }
@@ -1009,6 +1242,15 @@ const Background = (() => {
     if (on) on.classList.add("is-visible");
     if (off) off.classList.remove("is-visible");
     state.active = idx;
+  }
+
+  function updateBlockButton() {
+    const btn = document.getElementById("btn-bg-block");
+    if (!btn) return;
+    const id = state.displayedId;
+    const canBlock = !!id && !isBlocked(id);
+    btn.disabled = !canBlock;
+    btn.title = canBlock ? `Не показывать (id: ${id})` : "Нет сохранённой картинки для блокировки";
   }
 
   function idbOpen() {
@@ -1076,6 +1318,47 @@ const Background = (() => {
     await idbPut(db, BG.META, { ids, cursor: c });
   }
 
+  /** @param {IDBDatabase} db @param {{ ids: string[], cursor: number }} meta */
+  async function nextUnblocked(db, meta) {
+    const n = meta.ids.length;
+    if (n === 0) return null;
+    for (let step = 1; step <= n; step++) {
+      const ix = (meta.cursor + step) % n;
+      const id = meta.ids[ix];
+      if (!(await isBlockedCandidate(db, id))) return { showId: id, cursor: ix };
+    }
+    return null;
+  }
+
+  /** @param {IDBDatabase} db @param {string} showId */
+  async function showBlobById(db, showId) {
+    if (await isBlockedCandidate(db, showId)) return false;
+    let blob;
+    try {
+      blob = await idbGet(db, BG.blobKey(showId));
+    } catch {
+      blob = null;
+    }
+    if (!(blob instanceof Blob)) return false;
+    if (await isBlockedBlob(blob)) return false;
+
+    const url = URL.createObjectURL(blob);
+    state.displayedId = showId;
+    setLayerBg(0, url);
+    requestAnimationFrame(() => showLayer(0));
+    updateBlockButton();
+    return true;
+  }
+
+  /** @param {IDBDatabase} db @param {{ ids: string[], cursor: number }} meta */
+  async function advanceFromMeta(db, meta) {
+    const next = await nextUnblocked(db, meta);
+    if (!next) return false;
+    meta.cursor = next.cursor;
+    await writeMeta(db, meta);
+    return showBlobById(db, next.showId);
+  }
+
   async function fetchWallpaperBlob() {
     const seed = util.randomSeed();
     const url = CFG.picsumUrl(seed);
@@ -1090,40 +1373,61 @@ const Background = (() => {
     state.prefetching = true;
     const keepId = state.displayedId;
     try {
-      const meta0 = await readMeta(db);
-      const preIds = [...meta0.ids];
+      await ensureBlockedLoaded();
 
       const blobs = await Promise.all(
         Array.from({ length: BG.PREFETCH }, () => fetchWallpaperBlob()),
       );
       const newIds = [];
       for (const blob of blobs) {
+        if (await isBlockedBlob(blob)) continue;
         const id = util.randomSeed();
         await idbPut(db, BG.blobKey(id), blob);
         newIds.push(id);
       }
 
-      let combined = preIds.concat(newIds);
-      const toRemove = [];
-      if (keepId) {
-        for (const id of preIds) {
-          if (toRemove.length >= BG.PRUNE) break;
-          if (id === keepId) continue;
-          toRemove.push(id);
-        }
-        for (const id of toRemove) {
-          try {
-            await idbDel(db, BG.blobKey(id));
-          } catch {
-            /* ignore */
-          }
-        }
-        combined = combined.filter((id) => !toRemove.includes(id));
+      let meta = await readMeta(db);
+      const allowed = [];
+      for (const id of meta.ids) {
+        if (!(await isBlockedCandidate(db, id))) allowed.push(id);
+      }
+      meta.ids = allowed;
+
+      for (const id of newIds) {
+        if (!meta.ids.includes(id)) meta.ids.push(id);
       }
 
-      const ix = keepId ? combined.indexOf(keepId) : -1;
-      const cursor = ix >= 0 ? ix : Math.min(meta0.cursor, Math.max(0, combined.length - 1));
-      await writeMeta(db, { ids: combined, cursor });
+      if (keepId && !(await isBlockedCandidate(db, keepId)) && !meta.ids.includes(keepId)) {
+        meta.ids.unshift(keepId);
+      }
+
+      const toRemove = [];
+      for (const id of meta.ids) {
+        if (toRemove.length >= BG.PRUNE) break;
+        if (id === keepId) continue;
+        if (newIds.includes(id)) continue;
+        if (await isBlockedCandidate(db, id)) continue;
+        toRemove.push(id);
+      }
+      for (const id of toRemove) {
+        try {
+          await idbDel(db, BG.blobKey(id));
+        } catch {
+          /* ignore */
+        }
+      }
+      const kept = [];
+      for (const id of meta.ids) {
+        if (toRemove.includes(id)) continue;
+        if (await isBlockedCandidate(db, id)) continue;
+        kept.push(id);
+      }
+      meta.ids = kept;
+
+      const ix =
+        keepId && !(await isBlockedCandidate(db, keepId)) ? meta.ids.indexOf(keepId) : -1;
+      meta.cursor = ix >= 0 ? ix : Math.min(meta.cursor, Math.max(0, meta.ids.length - 1));
+      await writeMeta(db, meta);
     } catch {
       /* сеть недоступна — кеш без изменений */
     } finally {
@@ -1138,25 +1442,37 @@ const Background = (() => {
       );
       const ids = [];
       for (const blob of blobs) {
+        if (await isBlockedBlob(blob)) continue;
         const id = util.randomSeed();
         await idbPut(db, BG.blobKey(id), blob);
         ids.push(id);
       }
+      if (!ids.length) throw new Error("no unblocked blobs");
       await writeMeta(db, { ids, cursor: 0 });
-      const url = URL.createObjectURL(await idbGet(db, BG.blobKey(ids[0])));
-      state.displayedId = ids[0];
-      setLayerBg(0, url);
-      requestAnimationFrame(() => showLayer(0));
+      let first = null;
+      for (const id of ids) {
+        if (!(await isBlockedCandidate(db, id))) {
+          first = id;
+          break;
+        }
+      }
+      if (!first || !(await showBlobById(db, first))) {
+        throw new Error("no blob");
+      }
     } catch {
+      state.displayedId = null;
       const seed = util.randomSeed();
       setLayerBg(0, CFG.picsumUrl(seed));
       requestAnimationFrame(() => showLayer(0));
+      updateBlockButton();
     }
   }
 
   async function run() {
     const [L0, L1] = layers();
     if (!L0 || !L1) return;
+
+    await reloadBlockedList();
 
     let db;
     try {
@@ -1166,45 +1482,339 @@ const Background = (() => {
     }
 
     if (!db) {
+      state.displayedId = null;
       const seed = util.randomSeed();
       setLayerBg(0, CFG.picsumUrl(seed));
       requestAnimationFrame(() => showLayer(0));
+      updateBlockButton();
       return;
     }
 
     let meta = await readMeta(db);
+    meta = await sanitizeMeta(db, meta);
 
     if (meta.ids.length === 0) {
-      await bootstrapEmpty(db);
-      return;
-    }
-
-    const nextCursor = (meta.cursor + 1) % meta.ids.length;
-    const showId = meta.ids[nextCursor];
-    meta.cursor = nextCursor;
-    await writeMeta(db, meta);
-
-    let blob;
-    try {
-      blob = await idbGet(db, BG.blobKey(showId));
-    } catch {
-      blob = null;
-    }
-    if (!(blob instanceof Blob)) {
       await bootstrapEmpty(db);
       void prefetchAndPrune(db);
       return;
     }
 
-    const url = URL.createObjectURL(blob);
-    state.displayedId = showId;
-    setLayerBg(0, url);
-    requestAnimationFrame(() => showLayer(0));
+    const next = await nextUnblocked(db, meta);
+    if (!next) {
+      await bootstrapEmpty(db);
+      void prefetchAndPrune(db);
+      return;
+    }
+
+    meta.cursor = next.cursor;
+    await writeMeta(db, meta);
+
+    if (!(await showBlobById(db, next.showId))) {
+      meta.ids = meta.ids.filter((id) => id !== next.showId);
+      await writeMeta(db, meta);
+      await bootstrapEmpty(db);
+      void prefetchAndPrune(db);
+      return;
+    }
+
+    if (state.displayedId && (await isBlockedCandidate(db, state.displayedId))) {
+      meta = await readMeta(db);
+      if (await advanceFromMeta(db, meta)) {
+        void prefetchAndPrune(db);
+        return;
+      }
+      await bootstrapEmpty(db);
+      void prefetchAndPrune(db);
+      return;
+    }
 
     void prefetchAndPrune(db);
   }
 
-  return { init: run };
+  async function ensureCurrentNotBlocked() {
+    await reloadBlockedList();
+
+    let db;
+    try {
+      db = await idbOpen();
+    } catch {
+      db = null;
+    }
+    if (!db) return;
+
+    const id = state.displayedId;
+    if (!id || !(await isBlockedCandidate(db, id))) return;
+
+    let meta = await readMeta(db);
+    const kept = [];
+    for (const x of meta.ids) {
+      if (x === id) continue;
+      if (await isBlockedCandidate(db, x)) continue;
+      kept.push(x);
+    }
+    meta.ids = kept;
+    await writeMeta(db, meta);
+    if (meta.ids.length && (await advanceFromMeta(db, meta))) return;
+    await bootstrapEmpty(db);
+  }
+
+  async function blockCurrent() {
+    await ensureBlockedLoaded();
+    const id = state.displayedId;
+    if (!id || isBlocked(id)) return;
+
+    const nextIds = new Set(blockedSet);
+    const nextHashes = new Set(blockedHashes);
+    nextIds.add(id);
+
+    let db;
+    try {
+      db = await idbOpen();
+    } catch {
+      db = null;
+    }
+
+    if (db) {
+      const blob = await blobForId(db, id);
+      if (blob) {
+        const hash = await blobSha256(blob);
+        nextHashes.add(hash);
+
+        const meta0 = await readMeta(db);
+        for (const oid of meta0.ids) {
+          if (oid === id) continue;
+          const ob = await blobForId(db, oid);
+          if (ob && (await blobSha256(ob)) === hash) nextIds.add(oid);
+        }
+
+        try {
+          await uploadBlockedImage(id, blob);
+        } catch (e) {
+          console.warn("bg-blocked image upload:", e);
+        }
+      }
+    }
+
+    try {
+      await persistBlockedPayload(nextIds, nextHashes);
+    } catch {
+      return;
+    }
+
+    if (db) {
+      let meta = await readMeta(db);
+      const kept = [];
+      for (const x of meta.ids) {
+        if (await isBlockedCandidate(db, x)) continue;
+        kept.push(x);
+      }
+      meta.ids = kept;
+      if (meta.cursor >= meta.ids.length) {
+        meta.cursor = Math.max(0, meta.ids.length - 1);
+      }
+      await writeMeta(db, meta);
+
+      if (meta.ids.length && (await advanceFromMeta(db, meta))) {
+        void prefetchAndPrune(db);
+        return;
+      }
+      await bootstrapEmpty(db);
+      void prefetchAndPrune(db);
+      return;
+    }
+
+    state.displayedId = null;
+    const seed = util.randomSeed();
+    setLayerBg(0, CFG.picsumUrl(seed));
+    requestAnimationFrame(() => showLayer(0));
+    updateBlockButton();
+  }
+
+  /** @param {string} id */
+  async function unblock(id) {
+    await ensureBlockedLoaded();
+    if (!blockedSet.has(id)) return;
+
+    const nextIds = new Set(blockedSet);
+    nextIds.delete(id);
+    const nextHashes = new Set(blockedHashes);
+
+    let db = null;
+    try {
+      db = await idbOpen();
+    } catch {
+      db = null;
+    }
+    if (db) {
+      const blob = await blobForId(db, id);
+      if (blob) {
+        const hash = await blobSha256(blob);
+        let stillUsed = false;
+        for (const otherId of nextIds) {
+          const ob = await blobForId(db, otherId);
+          if (ob && (await blobSha256(ob)) === hash) {
+            stillUsed = true;
+            break;
+          }
+        }
+        if (!stillUsed) nextHashes.delete(hash);
+      }
+    }
+
+    try {
+      await persistBlockedPayload(nextIds, nextHashes);
+    } catch {
+      return;
+    }
+    await deleteBlockedImageOnServer(id);
+    updateBlockButton();
+  }
+
+  /** @returns {string[]} */
+  function listBlockedIds() {
+    return [...blockedSet];
+  }
+
+  /** @param {string} id @param {IDBDatabase} db */
+  async function blobForId(db, id) {
+    try {
+      const blob = await idbGet(db, BG.blobKey(id));
+      return blob instanceof Blob ? blob : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** @type {string[]} */
+  let modalThumbUrls = [];
+
+  function clearModalThumbs() {
+    for (const u of modalThumbUrls) revokeIfBlob(u);
+    modalThumbUrls = [];
+  }
+
+  async function renderBlockedModal() {
+    await ensureBlockedLoaded();
+    const grid = document.getElementById("bg-blocked-grid");
+    const empty = document.getElementById("bg-blocked-empty");
+    if (!grid || !empty) return;
+
+    clearModalThumbs();
+    grid.replaceChildren();
+
+    const ids = listBlockedIds();
+    empty.hidden = ids.length > 0;
+    if (!ids.length) return;
+
+    let db = null;
+    try {
+      db = await idbOpen();
+    } catch {
+      db = null;
+    }
+
+    for (const id of ids) {
+      const item = document.createElement("div");
+      item.className = "bg-blocked-item";
+
+      const thumb = document.createElement("div");
+      thumb.className = "bg-blocked-thumb";
+      thumb.setAttribute("role", "img");
+      thumb.setAttribute("aria-label", `Картинка ${id}`);
+
+      const img = document.createElement("img");
+      img.className = "bg-blocked-thumb-img";
+      img.alt = "";
+      img.decoding = "async";
+      img.loading = "lazy";
+      img.src = CFG.bgBlockedImageURL(id);
+      img.addEventListener("error", () => {
+        void (async () => {
+          if (await ensureBlockedImageOnServer(id, db)) {
+            img.src = `${CFG.bgBlockedImageURL(id)}?v=${Date.now()}`;
+            return;
+          }
+          if (db) {
+            const blob = await blobForId(db, id);
+            if (blob) {
+              const url = URL.createObjectURL(blob);
+              modalThumbUrls.push(url);
+              img.src = url;
+            }
+          }
+        })();
+      });
+      thumb.appendChild(img);
+
+      const idEl = document.createElement("span");
+      idEl.className = "bg-blocked-id";
+      idEl.textContent = id;
+      idEl.title = id;
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "bg-blocked-unblock";
+      btn.textContent = "Разблокировать";
+      btn.addEventListener("click", () => {
+        void (async () => {
+          await unblock(id);
+          try {
+            if (db) await idbDel(db, BG.blobKey(id));
+          } catch {
+            /* ignore */
+          }
+          await renderBlockedModal();
+        })();
+      });
+
+      item.append(thumb, idEl, btn);
+      grid.appendChild(item);
+    }
+  }
+
+  function openBlockedDialog() {
+    const dlg = document.getElementById("dlg-bg-blocked");
+    if (!dlg || !(dlg instanceof HTMLDialogElement)) return;
+    void ensureCurrentNotBlocked().then(() =>
+      renderBlockedModal().then(() => {
+        if (!dlg.open) dlg.showModal();
+      }),
+    );
+  }
+
+  function closeBlockedDialog() {
+    const dlg = document.getElementById("dlg-bg-blocked");
+    if (dlg instanceof HTMLDialogElement && dlg.open) {
+      dlg.close();
+    }
+    clearModalThumbs();
+  }
+
+  function bindControls() {
+    void ensureBlockedLoaded().then(() => updateBlockButton());
+
+    const blockBtn = document.getElementById("btn-bg-block");
+    const listBtn = document.getElementById("btn-bg-blocked-list");
+    const closeBtn = document.getElementById("bg-blocked-close");
+    const dlg = document.getElementById("dlg-bg-blocked");
+
+    if (blockBtn) {
+      blockBtn.addEventListener("click", () => {
+        void blockCurrent();
+      });
+    }
+    if (listBtn) {
+      listBtn.addEventListener("click", () => openBlockedDialog());
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener("click", () => closeBlockedDialog());
+    }
+    if (dlg instanceof HTMLDialogElement) {
+      dlg.addEventListener("close", () => clearModalThumbs());
+    }
+  }
+
+  return { init: run, bindControls };
 })();
 
 /** ЙЦУКЕН ↔ QWERTY (та же клавиша) — только для поиска, не для поля ввода. */
@@ -1844,8 +2454,8 @@ const Search = (() => {
   }
 
   function focusQuery() {
-    const dlg = document.getElementById("dlg-bookmark");
-    if (dlg && dlg.open) return;
+    const dlg = document.querySelector("dialog.modal[open]");
+    if (dlg) return;
     const input = inputEl();
     if (!input) return;
     input.focus({ preventScroll: true });
@@ -1888,8 +2498,8 @@ const Search = (() => {
       (e) => {
         if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
         if (e.key === "Tab" || e.key === "Escape" || e.key.startsWith("F")) return;
-        const dlg = document.getElementById("dlg-bookmark");
-        if (dlg && dlg.open) return;
+        const dlg = document.querySelector("dialog.modal[open]");
+        if (dlg) return;
         const input = inputEl();
         if (!input || document.activeElement === input) return;
         const t = e.target;
@@ -1997,6 +2607,7 @@ const App = {
       bmCancel.addEventListener("click", () => Bookmarks.closeDialog());
     }
 
+    Background.bindControls();
     queueMicrotask(() => Background.init());
   },
 };

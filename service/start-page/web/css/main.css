@@ -639,6 +639,141 @@ body:not(.is-brave) .stats {
   margin-top: 0.35rem;
 }
 
+.modal-wide {
+  width: min(920px, 94vw);
+  max-width: min(920px, 94vw);
+}
+
+#dlg-bg-blocked .modal-form {
+  min-width: 0;
+}
+
+.bg-controls {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 3;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.bg-ctrl-link {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 0;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.bg-ctrl-link:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.bg-ctrl-link:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.bg-ctrl-sep {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.65);
+  user-select: none;
+}
+
+.bg-blocked-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.bg-blocked-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.65rem;
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.1rem 0.35rem 0.1rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.bg-blocked-grid::-webkit-scrollbar {
+  width: 5px;
+}
+
+.bg-blocked-grid::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+.bg-blocked-grid::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
+
+.bg-blocked-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.bg-blocked-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.45rem;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.bg-blocked-thumb {
+  aspect-ratio: 16 / 10;
+  border-radius: 0.35rem;
+  background: rgba(255, 255, 255, 0.06) center / cover no-repeat;
+  background-color: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.bg-blocked-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.bg-blocked-id {
+  font-size: 0.62rem;
+  font-family: ui-monospace, monospace;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bg-blocked-unblock {
+  font: inherit;
+  font-size: 0.68rem;
+  padding: 0.25rem 0;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  text-align: left;
+}
+
+.bg-blocked-unblock:hover {
+  color: rgba(255, 255, 255, 0.92);
+}
+
 @media (max-width: 520px) {
   .stats-grid {
     grid-template-columns: 1fr;

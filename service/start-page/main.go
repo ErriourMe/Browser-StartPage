@@ -140,11 +140,14 @@ func browserPageRoot() string {
 }
 
 type rootHandler struct {
-	root          string
-	statsPath     string
-	bookmarksHTTP string
-	bookmarksFile string
-	staticFS      fs.FS
+	root            string
+	statsPath       string
+	bookmarksHTTP   string
+	bookmarksFile   string
+	blockedBgHTTP   string
+	blockedBgFile   string
+	blockedBgImgHTTP string
+	staticFS        fs.FS
 }
 
 func (h *rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +161,23 @@ func (h *rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+		return
+	}
+	if p == h.blockedBgHTTP {
+		switch r.Method {
+		case http.MethodGet:
+			blockedBgGetHandler(w, r, h.blockedBgFile)
+		case http.MethodPut, http.MethodOptions:
+			blockedBgPutHandler(w, r, h.blockedBgFile)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+		return
+	}
+	if strings.HasPrefix(p, h.blockedBgImgHTTP) {
+		id := strings.TrimPrefix(p, h.blockedBgImgHTTP)
+		id = strings.TrimSuffix(id, "/")
+		blockedBgImageHandler(w, r, h.blockedBgFile, id)
 		return
 	}
 	if p == h.statsPath {
@@ -280,15 +300,35 @@ func main() {
 	}
 	log.Printf("bookmarks file: %q  API: %s", bmFile, bookmarksHTTP)
 
+	blockedBgHTTP := strings.TrimSpace(os.Getenv("BG_BLOCKED_HTTP_PATH"))
+	if blockedBgHTTP == "" {
+		blockedBgHTTP = "/api/bg-blocked.json"
+	} else if !strings.HasPrefix(blockedBgHTTP, "/") {
+		blockedBgHTTP = "/" + blockedBgHTTP
+	}
+	blockedFile := blockedBgFilePath(root)
+	repoBlocked := filepath.Join(root, "bg-blocked.json")
+	if root != "" && blockedFile != repoBlocked {
+		log.Printf("bg-blocked: %q недоступен, используется %q", repoBlocked, blockedFile)
+	}
+	log.Printf("bg-blocked file: %q  API: %s", blockedFile, blockedBgHTTP)
+
+	blockedImgHTTP := blockedBgImageHTTPPath()
+	log.Printf("bg-blocked images dir: %q  API: %s*", blockedBgImagesDir(blockedFile), blockedImgHTTP)
+
 	h := &rootHandler{
-		root:          root,
-		statsPath:     statsPath,
-		bookmarksHTTP: bookmarksHTTP,
-		bookmarksFile: bmFile,
-		staticFS:      mustSubFS(embeddedAssets, "web"),
+		root:             root,
+		statsPath:        statsPath,
+		bookmarksHTTP:    bookmarksHTTP,
+		bookmarksFile:    bmFile,
+		blockedBgHTTP:    blockedBgHTTP,
+		blockedBgFile:    blockedFile,
+		blockedBgImgHTTP: blockedImgHTTP,
+		staticFS:         mustSubFS(embeddedAssets, "web"),
 	}
 
-	log.Printf("routes: GET / → index+закладки;  GET %s → brave-stats;  GET/PUT %s → закладки JSON", statsPath, bookmarksHTTP)
+	log.Printf("routes: GET / → index+закладки;  GET %s → brave-stats;  GET/PUT %s → закладки;  GET/PUT %s → bg-blocked;  */bg-blocked/image/{id}",
+		statsPath, bookmarksHTTP, blockedBgHTTP)
 
 	srv := &http.Server{Addr: addr, Handler: h}
 	runWithTray(srv, addr)

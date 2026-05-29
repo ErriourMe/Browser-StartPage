@@ -99,6 +99,23 @@
     </form>
   </dialog>
 
+  <div class="bg-controls" aria-label="Управление фоном">
+    <button type="button" class="bg-ctrl-link" id="btn-bg-block" disabled title="Не показывать эту картинку">Заблокировать картинку</button>
+    <span class="bg-ctrl-sep" aria-hidden="true">·</span>
+    <button type="button" class="bg-ctrl-link" id="btn-bg-blocked-list">Список заблокированных</button>
+  </div>
+
+  <dialog class="modal modal-wide" id="dlg-bg-blocked">
+    <div class="modal-form">
+      <h3>Заблокированные картинки</h3>
+      <p class="bg-blocked-empty" id="bg-blocked-empty" hidden>Нет заблокированных картинок</p>
+      <div class="bg-blocked-grid" id="bg-blocked-grid"></div>
+      <div class="modal-buttons">
+        <button type="button" class="btn" id="bg-blocked-close">Закрыть</button>
+      </div>
+    </div>
+  </dialog>
+
   <script src="js/app.js?v=9" defer></script>
 </body>
 </html>
