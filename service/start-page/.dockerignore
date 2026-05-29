@@ -1,1 +1,7 @@
-*.md
+*
+!go.mod
+!go.sum
+!main.go
+!bookmarks.go
+!tray_stub.go
+!web/**

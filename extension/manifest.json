@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Start Page",
+  "version": "3.3.0",
+  "description": "Новая вкладка — стартовая страница в расширении, фокус в поиске",
+  "permissions": ["scripting", "tabs", "history", "favicon"],
+  "host_permissions": [
+    "http://127.0.0.1:7777/*",
+    "https://picsum.photos/*",
+    "https://www.google.com/*",
+    "https://icons.duckduckgo.com/*"
+  ],
+  "chrome_url_overrides": {
+    "newtab": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

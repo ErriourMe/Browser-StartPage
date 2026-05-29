@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"embed"
 	"encoding/json"
+	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type statsPayload struct {
@@ -124,16 +129,14 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+//go:embed web/index.html web/favicon.svg web/css/main.css web/js/app.js web/fonts/inter-latin.woff2
+var embeddedAssets embed.FS
+
 func browserPageRoot() string {
 	if v := os.Getenv("BROWSER_PAGE_ROOT"); v != "" {
 		return filepath.Clean(os.ExpandEnv(v))
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	// …/BrowserPage/service/start-page → корень репозитория
-	return filepath.Clean(filepath.Join(wd, "..", ".."))
+	return ""
 }
 
 type rootHandler struct {
@@ -141,6 +144,7 @@ type rootHandler struct {
 	statsPath     string
 	bookmarksHTTP string
 	bookmarksFile string
+	staticFS      fs.FS
 }
 
 func (h *rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -167,7 +171,7 @@ func (h *rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if p == "/" || p == "/index.html" {
-		raw, err := os.ReadFile(filepath.Join(h.root, "index.html"))
+		raw, err := h.readIndex()
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -189,8 +193,32 @@ func (h *rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rel := strings.TrimPrefix(filepath.Clean("/"+strings.TrimPrefix(p, "/")), "/")
-	d := http.Dir(h.root)
-	f, err := d.Open(rel)
+	h.serveStatic(w, r, rel)
+}
+
+func (h *rootHandler) readIndex() ([]byte, error) {
+	if h.root != "" {
+		if raw, err := os.ReadFile(filepath.Join(h.root, "index.html")); err == nil {
+			return raw, nil
+		}
+	}
+	return fs.ReadFile(h.staticFS, "index.html")
+}
+
+func (h *rootHandler) serveStatic(w http.ResponseWriter, r *http.Request, rel string) {
+	if h.root != "" {
+		d := http.Dir(h.root)
+		f, err := d.Open(rel)
+		if err == nil {
+			defer f.Close()
+			if fi, statErr := f.Stat(); statErr == nil && !fi.IsDir() {
+				http.ServeContent(w, r, rel, fi.ModTime(), f)
+				return
+			}
+		}
+	}
+
+	f, err := h.staticFS.Open(rel)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -201,7 +229,15 @@ func (h *rootHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeContent(w, r, rel, fi.ModTime(), f)
+	b, err := fs.ReadFile(h.staticFS, rel)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if ct := mime.TypeByExtension(filepath.Ext(rel)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	http.ServeContent(w, r, rel, time.Time{}, bytes.NewReader(b))
 }
 
 func main() {
@@ -216,8 +252,10 @@ func main() {
 	addr := host + ":" + port
 	root := browserPageRoot()
 
-	if st, err := os.Stat(filepath.Join(root, "index.html")); err != nil || st.IsDir() {
-		log.Printf("warning: index.html not found in BROWSER_PAGE_ROOT=%q (статика будет 404)", root)
+	if root == "" {
+		log.Printf("static: embedded")
+	} else if st, err := os.Stat(filepath.Join(root, "index.html")); err != nil || st.IsDir() {
+		log.Printf("warning: index.html not found in BROWSER_PAGE_ROOT=%q (используется embedded)", root)
 	} else {
 		log.Printf("static: %q", root)
 	}
@@ -236,6 +274,10 @@ func main() {
 		bookmarksHTTP = "/" + bookmarksHTTP
 	}
 	bmFile := bookmarksFilePath(root)
+	repoBM := filepath.Join(root, "bookmarks.json")
+	if root != "" && bmFile != repoBM {
+		log.Printf("bookmarks: %q недоступен, используется %q (chown: sudo chown -R \"$USER\" bookmarks.json)", repoBM, bmFile)
+	}
 	log.Printf("bookmarks file: %q  API: %s", bmFile, bookmarksHTTP)
 
 	h := &rootHandler{
@@ -243,10 +285,19 @@ func main() {
 		statsPath:     statsPath,
 		bookmarksHTTP: bookmarksHTTP,
 		bookmarksFile: bmFile,
+		staticFS:      mustSubFS(embeddedAssets, "web"),
 	}
 
-	log.Printf("listen %s  GET / → index+закладки;  GET %s → brave-stats;  GET/PUT %s → закладки JSON", addr, statsPath, bookmarksHTTP)
-	if err := http.ListenAndServe(addr, h); err != nil {
-		log.Fatal(err)
+	log.Printf("routes: GET / → index+закладки;  GET %s → brave-stats;  GET/PUT %s → закладки JSON", statsPath, bookmarksHTTP)
+
+	srv := &http.Server{Addr: addr, Handler: h}
+	runWithTray(srv, addr)
+}
+
+func mustSubFS(fsys fs.FS, dir string) fs.FS {
+	sub, err := fs.Sub(fsys, dir)
+	if err != nil {
+		panic(err)
 	}
+	return sub
 }

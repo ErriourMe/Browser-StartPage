@@ -14,6 +14,7 @@
   <link rel="dns-prefetch" href="https://picsum.photos">
   <link rel="preload" href="fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/main.css?v=7">
+  <script src="focus-bootstrap.js"></script>
 </head>
 <body>
   <div id="bg-stack" aria-hidden="true">
@@ -29,7 +30,7 @@
 
     <div class="cluster">
     <section class="dock" aria-label="Закладки">
-      <!--STARTPAGE_BOOKMARKS-->
+      <ul class="bookmarks" id="bookmarks"></ul>
       <div class="bookmark-add-wrap">
         <button type="button" class="bookmark-add" id="btn-add-bookmark" title="Добавить закладку">+</button>
         <span class="bookmark-add-label">Добавить</span>

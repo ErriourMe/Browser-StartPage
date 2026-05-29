@@ -26,9 +26,49 @@ func bookmarksFilePath(root string) string {
 		if filepath.IsAbs(p) {
 			return p
 		}
+		if root == "" {
+			return filepath.Join(filepath.Dir(xdgBookmarksFile()), p)
+		}
 		return filepath.Join(root, p)
 	}
-	return filepath.Join(root, "bookmarks.json")
+	if root == "" {
+		return xdgBookmarksFile()
+	}
+	repo := filepath.Join(root, "bookmarks.json")
+	if bookmarksPathUsable(repo) {
+		return repo
+	}
+	return xdgBookmarksFile()
+}
+
+func xdgBookmarksFile() string {
+	base := os.Getenv("XDG_DATA_HOME")
+	if base == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return "bookmarks.json"
+		}
+		base = filepath.Join(h, ".local", "share")
+	}
+	return filepath.Join(base, "browser-startpage", "bookmarks.json")
+}
+
+func bookmarksPathUsable(path string) bool {
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err == nil {
+		_ = f.Close()
+		return true
+	}
+	if os.IsNotExist(err) {
+		return dirWritable(filepath.Dir(path))
+	}
+	return false
+}
+
+func dirWritable(dir string) bool {
+	return os.MkdirAll(dir, 0o755) == nil &&
+		os.WriteFile(filepath.Join(dir, ".write-test"), []byte{}, 0o644) == nil &&
+		os.Remove(filepath.Join(dir, ".write-test")) == nil
 }
 
 func normalizeBookmarkURL(raw string) string {
@@ -126,7 +166,10 @@ func writeBookmarksJSON(path string, list []bookmark) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	return os.Rename(tmpPath, path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o644)
 }
 
 func buildBookmarksSSR(list []bookmark) (htmlBlock string, err error) {

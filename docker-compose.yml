@@ -3,6 +3,7 @@ services:
     build:
       context: ./service/start-page
       dockerfile: Dockerfile
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       - "127.0.0.1:7777:7777"
     environment:

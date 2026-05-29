@@ -1,6 +1,8 @@
 bookmarks.json
 
+/browser-startpage
 /service/start-page/start-page
+/service/start-page/browser-startpage
 /service/start-page/*.exe
 
 .env

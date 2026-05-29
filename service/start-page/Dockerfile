@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.23-alpine AS build
 WORKDIR /src
-COPY go.mod main.go bookmarks.go ./
+COPY go.mod go.sum main.go bookmarks.go tray_stub.go ./
+COPY web ./web
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/start-page .
 
 FROM alpine:3.21
